@@ -46,7 +46,8 @@ object GlueClient {
   val NON_WORD_RE: Regex = """\W""".r
 
   def sanitise(str: String): String = {
-    NON_WORD_RE.replaceAllIn(str.trim.toLowerCase(Locale.ENGLISH), "_")
+    val replaced = NON_WORD_RE.replaceAllIn(str.trim.toLowerCase(Locale.ENGLISH), "_")
+    replaced.replaceAll("_{2,}", "_").stripPrefix("_").stripSuffix("_")
   }
 
   def tableName(client: String,
