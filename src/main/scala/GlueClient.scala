@@ -7,15 +7,14 @@ import scala.util.matching.Regex
 
 object GlueClient {
 
-  val S3_BUCKET: String = "rivigo-data-lake"
-  val S3_ROOT: String = "feature_store"
-
 //  val response =
 //    GlueClient.addPartitions(
+//      "s3-bucket",
+//      "feature_store"
 //      "zoom",
 //      "qc",
 //      "consignment",
-//      "v0000",
+//      "v0001",
 //      Seq(
 //        "y=2018/m=08/d=04",
 //        "y=2018/m=09/d=03",
@@ -24,29 +23,33 @@ object GlueClient {
 //      )
 //    )
 
-  def addPartitions(client: String,
+  def addPartitions(s3Bucket: String,
+                    db: String,
+                    client: String,
                     app: String,
                     entity: String,
                     version: String,
                     timeSuffixes: Seq[String]): BatchCreatePartitionResult = {
 
-    val db = S3_ROOT
     val table = tableName(client, app, entity, version)
-    val s3Prefix = s3PrefixPath(client, app, entity, version)
+    val s3Prefix = s3PrefixPath(s3Bucket, db, client, app, entity, version)
     batchCreatePartition(db, table, s3Prefix, timeSuffixes)
   }
 
-  def s3PrefixPath(client: String,
+  def s3PrefixPath(s3Bucket: String,
+                   db: String,
+                   client: String,
                    app: String,
                    entity: String,
                    version: String): String = {
-    s"s3://$S3_BUCKET/$S3_ROOT/$client/$app/$entity/data/$version"
+    s"s3://$s3Bucket/$db/$client/$app/$entity/data/$version"
   }
 
   val NON_WORD_RE: Regex = """\W""".r
 
   def sanitise(str: String): String = {
-    val replaced = NON_WORD_RE.replaceAllIn(str.trim.toLowerCase(Locale.ENGLISH), "_")
+    val replaced =
+      NON_WORD_RE.replaceAllIn(str.trim.toLowerCase(Locale.ENGLISH), "_")
     replaced.replaceAll("_{2,}", "_").stripPrefix("_").stripSuffix("_")
   }
 
