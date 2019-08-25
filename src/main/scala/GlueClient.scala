@@ -1,123 +1,81 @@
-import java.util.Locale
-
+import com.amazonaws.regions.Regions
 import com.amazonaws.services.glue.model._
 import com.amazonaws.services.glue.{AWSGlue, AWSGlueClient}
 
-import scala.util.matching.Regex
+import scala.collection.JavaConverters.seqAsJavaListConverter
 
 object GlueClient {
 
-//  val response =
-//    GlueClient.addPartitions(
-//      "s3-bucket",
-//      "feature_store"
-//      "zoom",
-//      "qc",
-//      "consignment",
-//      "v0001",
-//      Seq(
-//        "y=2018/m=08/d=04",
-//        "y=2018/m=09/d=03",
-//        "y=2018/m=09/d=02",
-//        "y=2018/m=09/d=01"
-//      )
-//    )
+  val maxPartitionsPerRequest: Int = 99
 
-  def addPartitions(s3Bucket: String,
-                    db: String,
-                    client: String,
-                    app: String,
-                    entity: String,
-                    version: String,
-                    timeSuffixes: Seq[String]): BatchCreatePartitionResult = {
-
-    val table = tableName(client, app, entity, version)
-    val s3Prefix = s3PrefixPath(s3Bucket, db, client, app, entity, version)
-    batchCreatePartition(db, table, s3Prefix, timeSuffixes)
-  }
-
-  def s3PrefixPath(s3Bucket: String,
-                   db: String,
-                   client: String,
-                   app: String,
-                   entity: String,
-                   version: String): String = {
-    s"s3://$s3Bucket/$db/$client/$app/$entity/data/$version"
-  }
-
-  val NON_WORD_RE: Regex = """\W""".r
-
-  def sanitise(str: String): String = {
-    val replaced =
-      NON_WORD_RE.replaceAllIn(str.trim.toLowerCase(Locale.ENGLISH), "_")
-    replaced.replaceAll("_{2,}", "_").stripPrefix("_").stripSuffix("_")
-  }
-
-  def tableName(client: String,
-                app: String,
-                entity: String,
-                version: String): String = {
-    Seq(client, app, entity, version).map(sanitise).mkString("_")
-  }
-
-  val glueClient: AWSGlue = {
-    AWSGlueClient.builder().withRegion("ap-south-1").build()
-  }
-
-  def batchCreatePartition(
+  def addPartitions(
+    s3Prefix: String,
+    region: Regions,
     dbName: String,
     tableName: String,
-    s3pathPrefix: String,
-    timeStrings: Seq[String]
-  ): BatchCreatePartitionResult = {
-    val request =
-      new BatchCreatePartitionRequest()
-        .withDatabaseName(dbName)
-        .withTableName(tableName)
-        .withPartitionInputList(partitionInputs(s3pathPrefix, timeStrings))
+    partitionCols: Seq[String],
+    partitionValues: Seq[Seq[String]]
+  ): Unit = {
+    require(s3Prefix.startsWith("s3://"), "S3 prefix doesn't start with `s3://`")
+    require(partitionCols.nonEmpty, "partitionCols empty")
+    require(
+      partitionValues.forall(v => v.length == partitionCols.length),
+      "Inequal partitions columns names and values"
+    )
 
-    glueClient.batchCreatePartition(request)
+    val glue = glueClient(region)
+
+    partitionValues
+      .grouped(maxPartitionsPerRequest)
+      .foreach { values =>
+        val request = new BatchCreatePartitionRequest()
+          .withDatabaseName(dbName)
+          .withTableName(tableName)
+          .withPartitionInputList(partitionInputs(s3Prefix, partitionCols, values).asJava)
+
+        println(s"Request : $request")
+        val response = glue.batchCreatePartition(request)
+        println(s"Response : $response")
+      }
   }
+
+  def glueClient(region: Regions): AWSGlue =
+    AWSGlueClient.builder().withRegion(region).build()
 
   def partitionInputs(
-    s3pathPrefix: String,
-    timeStrings: Seq[String]
-  ): java.util.List[PartitionInput] = {
-    import scala.collection.JavaConverters.seqAsJavaListConverter
-    val partitions = timeStrings.map(t => partitionInput(s3pathPrefix, t))
-    //    scala.collection.JavaConverters.seqAsJavaList(partitions) // for 2.12
-    partitions.asJava // scala 2.11
-  }
+    s3Prefix: String,
+    partitionCols: Seq[String],
+    partitionValues: Seq[Seq[String]]
+  ): Seq[PartitionInput] =
+    partitionValues.map(v => partitionInput(s3Prefix, partitionCols, v))
 
-  def partitionInput(s3pathPrefix: String,
-                     timeString: String): PartitionInput = {
-    val (y, m, d) = partitionValues(timeString)
-    val s3Loc = s"$s3pathPrefix/$timeString/"
+  def partitionInput(s3Prefix: String, keys: Seq[String], values: Seq[String]): PartitionInput = {
+    val path = s3PartitionPath(s3Prefix, keys, values)
+
     new PartitionInput()
-      .withValues(y, m, d)
-      .withStorageDescriptor(storageDescriptor(s3Loc))
+      .withValues(values.asJava)
+      .withStorageDescriptor(storageDescriptor(path))
   }
 
-  val YYYY_MM_DD: Regex = """^y=(\d{4})/m=(\d{2})/d=(\d{2})$""".r
-  def partitionValues(timeString: String): (String, String, String) = {
-    timeString match {
-      case YYYY_MM_DD(y, m, d) => (y, m, d)
-    }
+  def s3PartitionPath(prefix: String, keys: Seq[String], values: Seq[String]): String = {
+    val suffix = keys.zip(values).map { case (k, v) => s"$k=$v" }.mkString("/")
+    s"$prefix/$suffix/"
   }
 
-  def storageDescriptor(s3Location: String): StorageDescriptor = {
+  def storageDescriptor(s3Location: String): StorageDescriptor =
     new StorageDescriptor()
       .withLocation(s3Location)
       .withInputFormat(parquetInputFormat)
       .withOutputFormat(parquetOutputFormat)
       .withSerdeInfo(serDeInfo)
       .withParameters(storageParams)
-  }
 
   val parquetOutputFormat: String =
     "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
+
   val parquetInputFormat: String =
     "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
+
   val storageParams: java.util.Map[String, String] = {
     val params = new java.util.HashMap[String, String]()
     params.put("classification", "parquet")
@@ -126,6 +84,7 @@ object GlueClient {
   }
 
   val serializer = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+
   val serDeInfo: SerDeInfo = {
     new SerDeInfo()
       .withName("SERDE")
