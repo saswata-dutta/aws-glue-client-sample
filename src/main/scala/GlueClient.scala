@@ -6,7 +6,38 @@ import scala.collection.JavaConverters.{mapAsJavaMapConverter, seqAsJavaListConv
 
 object GlueClient {
 
-  val maxPartitionsPerRequest: Int = 99
+  /**
+    *
+    * @param s3Prefix : the S3 base folder path of the data
+    * @param region
+    * @param dbName
+    * @param tableName
+    * @param partitionCols : Must be of type strings
+    * @param dataCols : is the hive schema obtained by say "describe table"
+    *               or df.schema.fields.map(f => (f.name, f.dataType.typeName))
+    */
+  @SuppressWarnings(Array("org.wartremover.contrib.warts.ExposedTuples"))
+  def createTable(
+    s3Prefix: String,
+    region: Regions,
+    dbName: String,
+    tableName: String,
+    partitionCols: Seq[String],
+    dataCols: Seq[(String, String)]
+  ): Unit = {
+    require(s3Prefix.startsWith("s3://"), "S3 prefix doesn't start with `s3://`")
+    require(partitionCols.nonEmpty, "partitionCols empty")
+    val glue = glueClient(region)
+
+    val request =
+      new CreateTableRequest()
+        .withDatabaseName(dbName)
+        .withTableInput(tableInput(s3Prefix, tableName, partitionCols, dataCols))
+    println(request)
+
+    val response = glue.createTable(request)
+    println(response)
+  }
 
   def addPartitions(
     s3Prefix: String,
@@ -39,6 +70,8 @@ object GlueClient {
       }
   }
 
+  val maxPartitionsPerRequest: Int = 99
+
   def glueClient(region: Regions): AWSGlue =
     AWSGlueClient.builder().withRegion(region).build()
 
@@ -61,6 +94,30 @@ object GlueClient {
     val suffix = keys.zip(values).map { case (k, v) => s"$k=$v" }.mkString("/")
     s"$prefix/$suffix/"
   }
+
+  @SuppressWarnings(Array("org.wartremover.contrib.warts.ExposedTuples"))
+  def tableInput(
+    s3Prefix: String,
+    tableName: String,
+    partitionCols: Seq[String],
+    dataCols: Seq[(String, String)]
+  ): TableInput =
+    new TableInput()
+      .withName(tableName)
+      .withTableType("EXTERNAL_TABLE")
+      .withStorageDescriptor(storageDescriptor(s3Prefix, dataCols))
+      .withPartitionKeys(partitionKeys(partitionCols).asJava)
+
+  def partitionKeys(partitionCols: Seq[String]): Seq[Column] =
+    columns(partitionCols.map(it => (it, "string")))
+
+  @SuppressWarnings(Array("org.wartremover.contrib.warts.ExposedTuples"))
+  def storageDescriptor(s3Location: String, dataCols: Seq[(String, String)]): StorageDescriptor =
+    storageDescriptor(s3Location).withColumns(columns(dataCols).asJava)
+
+  @SuppressWarnings(Array("org.wartremover.contrib.warts.ExposedTuples"))
+  def columns(cols: Seq[(String, String)]): Seq[Column] =
+    cols.map(it => new Column().withName(it._1).withType(it._2))
 
   def storageDescriptor(s3Location: String): StorageDescriptor =
     new StorageDescriptor()
