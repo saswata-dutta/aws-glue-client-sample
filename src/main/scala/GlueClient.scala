@@ -2,7 +2,7 @@ import com.amazonaws.regions.Regions
 import com.amazonaws.services.glue.model._
 import com.amazonaws.services.glue.{AWSGlue, AWSGlueClient}
 
-import scala.collection.JavaConverters.seqAsJavaListConverter
+import scala.collection.JavaConverters.{mapAsJavaMapConverter, seqAsJavaListConverter}
 
 object GlueClient {
 
@@ -68,7 +68,7 @@ object GlueClient {
       .withInputFormat(parquetInputFormat)
       .withOutputFormat(parquetOutputFormat)
       .withSerdeInfo(serDeInfo)
-      .withParameters(storageParams)
+      .withParameters(storageParams.asJava)
 
   val parquetOutputFormat: String =
     "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
@@ -76,22 +76,15 @@ object GlueClient {
   val parquetInputFormat: String =
     "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat"
 
-  val storageParams: java.util.Map[String, String] = {
-    val params = new java.util.HashMap[String, String]()
-    params.put("classification", "parquet")
-    params.put("typeOfData", "file")
-    params
-  }
+  val storageParams: Map[String, String] =
+    Map("classification" -> "parquet", "typeOfData" -> "file")
 
-  val serializer = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
+  val serializer: String = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
 
   val serDeInfo: SerDeInfo = {
     new SerDeInfo()
       .withName("SERDE")
       .withSerializationLibrary(serializer)
-      .withParameters(
-        java.util.Collections
-          .singletonMap[String, String]("serialization.format", "1")
-      )
+      .withParameters(Map("serialization.format" -> "1").asJava)
   }
 }
