@@ -47,12 +47,7 @@ object GlueClient {
     partitionCols: Seq[String],
     partitionValues: Seq[Seq[String]]
   ): Unit = {
-    require(s3Prefix.startsWith("s3://"), "S3 prefix doesn't start with `s3://`")
-    require(partitionCols.nonEmpty, "partitionCols empty")
-    require(
-      partitionValues.forall(v => v.length == partitionCols.length),
-      "Inequal partitions columns names and values"
-    )
+    validate(s3Prefix, partitionCols, partitionValues)
 
     val glue = glueClient(region)
 
@@ -68,6 +63,42 @@ object GlueClient {
         val response = glue.batchCreatePartition(request)
         println(s"Response : $response")
       }
+  }
+
+  def deletePartitions(
+    region: Regions,
+    dbName: String,
+    tableName: String,
+    partitionValues: Seq[Seq[String]]
+  ): Unit = {
+
+    val glue = glueClient(region)
+
+    partitionValues
+      .grouped(maxPartitionsPerRequest)
+      .foreach { values =>
+        val request = new BatchDeletePartitionRequest()
+          .withDatabaseName(dbName)
+          .withTableName(tableName)
+          .withPartitionsToDelete(partitionValueLists(values).asJava)
+
+        println(s"Request : $request")
+        val response = glue.batchDeletePartition(request)
+        println(s"Response : $response")
+      }
+  }
+
+  def validate(
+    s3Prefix: String,
+    partitionCols: Seq[String],
+    partitionValues: Seq[Seq[String]]
+  ): Unit = {
+    require(s3Prefix.startsWith("s3://"), "S3 prefix doesn't start with `s3://`")
+    require(partitionCols.nonEmpty, "partitionCols empty")
+    require(
+      partitionValues.forall(v => v.length == partitionCols.length),
+      "Inequal partitions columns names and values"
+    )
   }
 
   val maxPartitionsPerRequest: Int = 99
@@ -118,6 +149,12 @@ object GlueClient {
   @SuppressWarnings(Array("org.wartremover.contrib.warts.ExposedTuples"))
   def columns(cols: Seq[(String, String)]): Seq[Column] =
     cols.map(it => new Column().withName(it._1).withType(it._2))
+
+  def partitionValueLists(partitionValues: Seq[Seq[String]]): Seq[PartitionValueList] =
+    partitionValues.map(it => {
+      val list = new PartitionValueList()
+      list.withValues(it.asJava)
+    })
 
   def storageDescriptor(s3Location: String): StorageDescriptor =
     new StorageDescriptor()
