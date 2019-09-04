@@ -2,7 +2,19 @@ import com.amazonaws.regions.Regions
 
 object Main {
 
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit =
+    deletePartitions()
+
+  def deletePartitions(): Unit = {
+    val awsRegion: Regions = Regions.AP_SOUTHEAST_1
+    val dbName: String = "feature_store_sg"
+    val tableName: String = "prime_trip_sensors_1s_v0001"
+
+    val partitionValues = Seq(Seq("2019", "08", "02"), Seq("2019", "08", "03"))
+    GlueClient.deletePartitions(awsRegion, dbName, tableName, partitionValues)
+  }
+
+  def createTable(): Unit = {
     val awsRegion: Regions = Regions.AP_SOUTHEAST_1
     val s3Prefix: String =
       "s3://rivigo-data-lake-sg/feature_store/prime/trip/sensors_30s/v0001/data"
